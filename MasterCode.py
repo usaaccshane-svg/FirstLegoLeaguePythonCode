@@ -9,12 +9,44 @@ import hashlib
 import os
 import sys
 import time
+import runloop # pyright: ignore[reportMissingImports]
 import motor # pyright: ignore[reportMissingImports]
 import hub #pyright: ignore[reportMissingImports]
 from hub import port # pyright: ignore[reportMissingImports]
 
 print("Library Load Success")
 print("Starting Function load")
+
+system_status = True
+raw_unfiltered_status = True
+tilt_angles = hub.motion_sensor.tilt_angles()
+yaw_angle = tilt_angles[0]
+pitch_angle = tilt_angles[1]
+roll_angle = tilt_angles[2]
+
+acceleration_values = hub.motion_sensor.acceleration(raw_unfiltered_status)
+x_acceleration = acceleration_values[0]
+y_acceleration = acceleration_values[1]
+z_acceleration = acceleration_values[2]
+
+update_cycle_time = 5
+
+async def LatestReadings(): #Helper Process to constantly update data
+    global system_status, tilt_angles, yaw_angle, pitch_angle, roll_angle,acceleration_values,x_acceleration,y_acceleration,z_acceleration
+    
+    while system_status:
+        tilt_angles = hub.motion_sensor.tilt_angles()
+        yaw_angle = tilt_angles[0]
+        pitch_angle = tilt_angles[1]
+        roll_angle = tilt_angles[2]
+        
+        acceleration_values = hub.motion_sensor.acceleration(raw_unfiltered_status)
+        x_acceleration = acceleration_values[0]
+        y_acceleration = acceleration_values[1]
+        z_acceleration = acceleration_values[2]
+        
+        
+        await runloop.sleep_ms(update_cycle_time)
 
 #You may be asking why should I use the functions, well its because it has checks for reliability and debugging
 
@@ -96,7 +128,7 @@ class BatteryFunctions:
             ConvertedVoltage = current_battery_voltage/1000
             print(ConvertedVoltage)
             return ConvertedVoltage
-        elif ConvertedVoltage == False:
+        elif ConversionToVolts == False:
             print(current_battery_voltage)
             return(current_battery_voltage)
         else:
@@ -155,3 +187,9 @@ class BatteryFunctions:
             return None
 
 print("BatteryFunctions Loaded")
+
+class CoreFunctions:
+    print("Loading Core Functions")
+
+async def main():
+    print("Async Main")
