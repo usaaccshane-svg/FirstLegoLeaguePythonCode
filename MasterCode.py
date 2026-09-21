@@ -19,10 +19,10 @@ print("Starting Function load")
 
 system_status = True
 raw_unfiltered_status = True
-tilt_angles = hub.motion_sensor.tilt_angles()
-yaw_angle = tilt_angles[0]
-pitch_angle = tilt_angles[1]
-roll_angle = tilt_angles[2]
+ang_vel = hub.motion_sensor.angular_velocity(True)
+yaw_angle = ang_vel[0]
+pitch_angle = ang_vel[1]
+roll_angle = ang_vel[2]
 
 acceleration_values = hub.motion_sensor.acceleration(raw_unfiltered_status)
 x_acceleration = acceleration_values[0]
@@ -35,17 +35,23 @@ async def LatestReadings(): #Helper Process to constantly update data
     global system_status, tilt_angles, yaw_angle, pitch_angle, roll_angle,acceleration_values,x_acceleration,y_acceleration,z_acceleration
     
     while system_status:
-        tilt_angles = hub.motion_sensor.tilt_angles()
-        yaw_angle = tilt_angles[0]
-        pitch_angle = tilt_angles[1]
-        roll_angle = tilt_angles[2]
+        ang_vel = hub.motion_sensor.angular_velocity(True)
+        yaw_angle = ang_vel[0]
+        pitch_angle = ang_vel[1]
+        roll_angle = ang_vel[2]
         
         acceleration_values = hub.motion_sensor.acceleration(raw_unfiltered_status)
         x_acceleration = acceleration_values[0]
         y_acceleration = acceleration_values[1]
         z_acceleration = acceleration_values[2]
         
-        
+        print("Yaw Angle: ", yaw_angle)
+        print("Pitch Angle: ", pitch_angle)
+        print("Roll Angle: ", roll_angle)
+        print("X Acceleration: ", x_acceleration)
+        print("Y Acceleration: ", y_acceleration)
+        print("Z Acceleration: ", z_acceleration)
+
         await runloop.sleep_ms(update_cycle_time)
 
 #You may be asking why should I use the functions, well its because it has checks for reliability and debugging
@@ -191,5 +197,9 @@ print("BatteryFunctions Loaded")
 class CoreFunctions:
     print("Loading Core Functions")
 
+runloop.run(LatestReadings()) 
+
 async def main():
     print("Async Main")
+
+runloop.run(main())
