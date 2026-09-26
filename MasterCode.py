@@ -8,6 +8,9 @@ import motor # pyright: ignore[reportMissingImports]
 import hub #pyright: ignore[reportMissingImports]
 import motor_pair # pyright: ignore[reportMissingImports]
 from hub import port # pyright: ignore[reportMissingImports]
+import color_sensor # pyright: ignore[reportMissingImports]
+import color  # pyright: ignore[reportMissingImports]
+
 
 print("Library Load Success")
 print("Starting Function load")
@@ -29,7 +32,7 @@ yaw_angle = tilt_values[0]
 pitch_angle = tilt_values[1]
 roll_angle = tilt_values[2]
 
-update_cycle_time = 100 #Time in milliseconds for how often the data is updated, this is used for the LatestReadings function
+update_cycle_time = 10 #Time in milliseconds for how often the data is updated, this is used for the LatestReadings function
 
 current_position = (0,0) #x and y position of the robot in cm, this is used for odometry calculations
 
@@ -216,7 +219,7 @@ class CoreFunctions:
     print("Loading Core Functions")
     
     @staticmethod
-    def Get_Directions_To_Waypoint(waypoint):
+    def Get_Directions_To_Waypoint(waypoint): #Key to Spike Odometry Based Navigational Estimate System or SOBNES for short, this function will calculate the distance and angle to a waypoint from the current position of the robot
         global current_position
         print("Current Position: ", current_position)
         print("Going to Waypoint: ", waypoint)
@@ -231,7 +234,7 @@ class CoreFunctions:
         return distance, angle_to_waypoint
     
     @staticmethod 
-    def Go_To_Waypoint(waypoint, base_speed):
+    def Go_To_Waypoint(waypoint, base_speed): #Key to Spike Odometry Based Navigational Estimate System or SOBNES for short, this function will move the robot to a waypoint from the current position of the robot
         global current_position
         clockwise = None # This variable will determine the direction of rotation. 0 for clockwise, 1 for counterclockwise
         distance, angle_to_waypoint = CoreFunctions.Get_Directions_To_Waypoint(waypoint)
@@ -243,18 +246,69 @@ class CoreFunctions:
         
         if clockwise <= 179.5:
             print("Turning Clockwise")
-            while yaw_angle <= (angle_to_waypoint * 10) - 2 or yaw_angle >= (angle_to_waypoint * 10) + 2:
+            while yaw_angle <= ((angle_to_waypoint * 10)*0.9) - 2 or yaw_angle >= ((angle_to_waypoint * 10)*0.9) + 2:
                 motor_pair.move_tank(motor_pair.PAIR_1, base_speed, -base_speed)
+                runloop.sleep_ms(update_cycle_time)
+                break
+            
+            motor_pair.stop(motor_pair.PAIR_1)
+            
+            while yaw_angle <= ((angle_to_waypoint * 10)) - 1 or yaw_angle >= ((angle_to_waypoint * 10)) + 1:
+                            motor_pair.move_tank(motor_pair.PAIR_1, (base_speed*0.2), (-base_speed*0.2))
+                            runloop.sleep_ms(update_cycle_time)
+                            break
+            
+            motor_pair.stop(motor_pair.PAIR_1)
+            
+            
         elif clockwise >= 180:
             print("Turning Counterclockwise")
-            while yaw_angle <= (angle_to_waypoint * 10) - 2 or yaw_angle >= (angle_to_waypoint * 10) + 2:
+            while yaw_angle <= ((angle_to_waypoint * 10)*0.9) - 2 or yaw_angle >= ((angle_to_waypoint * 10)*0.9) + 2:
                 motor_pair.move_tank(motor_pair.PAIR_1, -base_speed, base_speed)
+                runloop.sleep_ms(update_cycle_time)
+                break
+            
+            motor_pair.stop(motor_pair.PAIR_1)
+            
+            while yaw_angle <= ((angle_to_waypoint * 10)) - 1 or yaw_angle >= ((angle_to_waypoint * 10)) + 1:
+                motor_pair.move_tank(motor_pair.PAIR_1, (-base_speed*0.2), (base_speed*0.2))
+                runloop.sleep_ms(update_cycle_time)
+                break
+            
+            motor_pair.stop(motor_pair.PAIR_1)
+            
         else:
             print("Unknown Direction, Stopping")
             motor_pair.stop(motor_pair.PAIR_1)
         
         current_position = waypoint
         print("Arrived at Waypoint: ", current_position)
+
+    @staticmethod
+    def Stop_On_Color_Detection(chose_color,chose_port, base_speed): #This function will stop the robot when it detects a specific color, this is used for color_based navigation and color-based object detection
+        while color_sensor.color(chose_port) != chose_color:
+            print("Waiting for color:", chose_color)
+            print("Current Color: ", color_sensor.color(chose_port))
+            motor_pair.move_tank(motor_pair.PAIR_1, base_speed, base_speed)
+            runloop.sleep_ms(update_cycle_time)
+        motor_pair.stop(motor_pair.PAIR_1)
+    
+    @staticmethod
+    def Align_On_line(chose_color,chose_port_left,chose_port_right):
+        while color_sensor.color(chose_port_left) != chose_color or color_sensor.color(chose_port_right) != chose_color:
+            if color_sensor.color(chose_port_left) != chose_color and color_sensor.color(chose_port_right) == chose_color:
+                print("Aligning Left")
+                motor_pair.move_tank(motor_pair.PAIR_1, 20, -20)
+                runloop.sleep_ms(update_cycle_time)
+            elif color_sensor.color(chose_port_left) == chose_color and color_sensor.color(chose_port_right) != chose_color:
+                print("Aligning Right")
+                motor_pair.move_tank(motor_pair.PAIR_1, -20, 20)
+                runloop.sleep_ms(update_cycle_time)
+            elif color_sensor.color(chose_port_left) != chose_color and color_sensor.color(chose_port_right) != chose_color:
+                print("Aligning Both")
+                motor_pair.move_tank(motor_pair.PAIR_1, 20, 20)
+                runloop.sleep_ms(update_cycle_time)
+        motor_pair.stop(motor_pair.PAIR_1)
 
 print("CoreFunctions Loaded")
 
