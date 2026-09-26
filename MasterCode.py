@@ -15,6 +15,12 @@ import color  # pyright: ignore[reportMissingImports]
 print("Library Load Success")
 print("Starting Function load")
 
+wheel_radius = 0.05       # in meters, adjust this value based on your robot's wheel radius
+ticks_per_revolution = 360
+meter_per_tick = (2 * math.pi * wheel_radius) / ticks_per_revolution
+
+
+
 system_status = True
 raw_unfiltered_status = True
 ang_vel = hub.motion_sensor.angular_velocity(True)
@@ -36,10 +42,22 @@ update_cycle_time = 10 #Time in milliseconds for how often the data is updated, 
 
 current_position = (0,0) #x and y position of the robot in cm, this is used for odometry calculations
 
+wheel_radius = 0.05       # in meters, adjust this value based on your robot's wheel radius
+ticks_per_revolution = 360
+meter_per_tick = (2 * math.pi * wheel_radius) / ticks_per_revolution
+
+theta = yaw_angle * (math.pi / 180)  # Convert yaw angle to radians
+
+current_ticks_left = motor.relative_position(motor_pair.PORT_A)
+current_ticks_right = motor.relative_position(motor_pair.PORT_B)
+
+previous_ticks_left = 0
+previous_ticks_right = 0
+
 Waypoints = [(0,0),(10,10),(20,20),(30,30)] #List of waypoints for the robot to follow in cm change this to whatever you want, the robot will follow these waypoints in order
 
 async def LatestReadings(): #Helper Process to constantly update data
-    global system_status, tilt_angles, yaw_angle_vel, pitch_angle_vel, roll_angle_vel, acceleration_values, x_acceleration, y_acceleration, z_acceleration, current_position, Waypoints, update_cycle_time, raw_unfiltered_status, yaw_angle, pitch_angle, roll_angle
+    global system_status, tilt_angles, yaw_angle_vel, pitch_angle_vel, roll_angle_vel, acceleration_values, x_acceleration, y_acceleration, z_acceleration, current_position, Waypoints, update_cycle_time, raw_unfiltered_status, yaw_angle, pitch_angle, roll_angle, theta, previous_ticks_left, previous_ticks_right, current_ticks_left, current_ticks_right, delta_ticks_left, delta_ticks_right,s_left, s_right, d
     
     while system_status:
         ang_vel = hub.motion_sensor.angular_velocity(True)
@@ -56,7 +74,27 @@ async def LatestReadings(): #Helper Process to constantly update data
         yaw_angle = tilt_values[0]
         pitch_angle = tilt_values[1]
         roll_angle = tilt_values[2]
+        
+        theta = yaw_angle * (math.pi / 180)  # Convert yaw angle to radians
+        
+        delta_ticks_left = current_ticks_left - previous_ticks_left
+        delta_ticks_right = current_ticks_right - previous_ticks_right
+        
+        previous_ticks_left = current_ticks_left
+        previous_ticks_right = current_ticks_right
+        
+        current_ticks_left = motor.relative_position(motor_pair.PORT_A)
+        current_ticks_right = motor.relative_position(motor_pair.PORT_B)
 
+        s_left = delta_ticks_left * meter_per_tick
+        s_right = delta_ticks_right * meter_per_tick
+        
+        d=s_left + s_right / 2
+        
+        x += d * math.cos(theta)
+        y += d * math.sin(theta)
+        current_position = (x, y)
+        
         print("Yaw Angle Velocity: ", yaw_angle_vel)
         print("Pitch Angle Velocity: ", pitch_angle_vel)
         print("Roll Angle Velocity: ", roll_angle_vel)
@@ -67,6 +105,15 @@ async def LatestReadings(): #Helper Process to constantly update data
         print("Pitch Angle: ", pitch_angle)
         print("Roll Angle: ", roll_angle)
         print("Current Position: ", current_position)
+        print("Delta Ticks Left: ", delta_ticks_left)
+        print("Delta Ticks Right: ", delta_ticks_right)
+        print("Current Ticks Left: ", current_ticks_left)
+        print("Current Ticks Right: ", current_ticks_right)
+        print("Previous Ticks Left: ", previous_ticks_left)
+        print("Previous Ticks Right: ", previous_ticks_right)
+        print("S Left: ", s_left)
+        print("S Right: ", s_right)
+        print("D: ", d)
         print("Waypoints: ", Waypoints)
         print("System Status: ", system_status)
         print("Update Cycle Time: ", update_cycle_time)
@@ -101,6 +148,8 @@ class MotorFunctions:
         print(chose_port_value)
         print("Successful")
         return chose_port_value
+
+
 
     @staticmethod
     def MotorResetRelativePosition(chose_port, set_position, PostChecks): #set_position is a variable that controls if you want it to set to a specific value. #Post checks is a true and false variables that controls whether you want to make sure that the position reset properly
