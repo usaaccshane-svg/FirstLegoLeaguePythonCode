@@ -39,14 +39,17 @@ async def LatestReadings(): #Helper Process to constantly update data
         
         theta = ( yaw_angle / 10) * (math.pi / 180)  # Convert yaw angle to radians
         
+        # Fix 6: read fresh ticks first, THEN compute delta against last iteration's
+        # fresh value, THEN roll previous forward - keeps delta_ticks in sync with
+        # the theta computed above instead of lagging by one whole update cycle
+        current_ticks_left = motor.relative_position(port.A)
+        current_ticks_right = motor.relative_position(port.B)
+        
         delta_ticks_left = current_ticks_left - previous_ticks_left
         delta_ticks_right = current_ticks_right - previous_ticks_right
         
         previous_ticks_left = current_ticks_left
         previous_ticks_right = current_ticks_right
-        
-        current_ticks_left = motor.relative_position(port.A)
-        current_ticks_right = motor.relative_position(port.B)
 
         s_left = delta_ticks_left * meter_per_tick
         s_right = delta_ticks_right * meter_per_tick
@@ -299,6 +302,21 @@ class CoreFunctions:
             print("Already Facing Waypoint")
             motor_pair.stop(motor_pair.PAIR_1)
 
+        # Fix 5: now that we're facing the waypoint, actually drive to it.
+        # current_position is kept live by the concurrently running LatestReadings()
+        # task, so we just drive straight until odometry says we're close enough.
+        print("Driving Forward to Waypoint")
+        distance_tolerance = 0.02  # stop once within this many units of the waypoint
+
+        def distance_remaining():
+            return math.sqrt((waypoint[0] - current_position[0]) ** 2 + (waypoint[1] - current_position[1]) ** 2)
+
+        while distance_remaining() > distance_tolerance:
+            motor_pair.move_tank(motor_pair.PAIR_1, base_speed, base_speed)
+            await runloop.sleep_ms(update_cycle_time)
+
+        motor_pair.stop(motor_pair.PAIR_1)
+
         current_position = waypoint
         print("Arrived at Waypoint: ", current_position)
 
@@ -359,8 +377,12 @@ class CoreFunctions:
         current_position = (0, 0)
         previous_ticks_left = 0
         previous_ticks_right = 0
-        current_ticks_left = motor.reset_relative_position(port.A, 0)
-        current_ticks_right = motor.reset_relative_position(port.B, 0)
+        # Fix 1: reset_relative_position() returns None, not the new position -
+        # call it for its side effect, then read the (now-reset) position separately
+        motor.reset_relative_position(port.A, 0)
+        motor.reset_relative_position(port.B, 0)
+        current_ticks_left = motor.relative_position(port.A)
+        current_ticks_right = motor.relative_position(port.B)
         
 
         raw_unfiltered_status = True
