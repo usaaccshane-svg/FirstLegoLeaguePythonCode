@@ -10,54 +10,16 @@ import motor_pair # pyright: ignore[reportMissingImports]
 from hub import port # pyright: ignore[reportMissingImports]
 import color_sensor # pyright: ignore[reportMissingImports]
 import color  # pyright: ignore[reportMissingImports]
+import device # pyright: ignore[reportMissingImports]
 
 
 print("Library Load Success")
 print("Starting Function load")
 
-wheel_radius = 0.05       # in meters, adjust this value based on your robot's wheel radius
-ticks_per_revolution = 360
-meter_per_tick = (2 * math.pi * wheel_radius) / ticks_per_revolution
-
-
-
-system_status = True
-raw_unfiltered_status = True
-ang_vel = hub.motion_sensor.angular_velocity(True)
-yaw_angle_vel = ang_vel[0]
-pitch_angle_vel = ang_vel[1]
-roll_angle_vel = ang_vel[2]
-
-acceleration_values = hub.motion_sensor.acceleration(raw_unfiltered_status)
-x_acceleration = acceleration_values[0]
-y_acceleration = acceleration_values[1]
-z_acceleration = acceleration_values[2]
-
-tilt_values = hub.motion_sensor.tilt_angles()
-yaw_angle = tilt_values[0]
-pitch_angle = tilt_values[1]
-roll_angle = tilt_values[2]
-
-update_cycle_time = 10 #Time in milliseconds for how often the data is updated, this is used for the LatestReadings function
-
-current_position = (0,0) #x and y position of the robot in cm, this is used for odometry calculations
-
-wheel_radius = 0.05       # in meters, adjust this value based on your robot's wheel radius
-ticks_per_revolution = 360
-meter_per_tick = (2 * math.pi * wheel_radius) / ticks_per_revolution
-
-theta = yaw_angle * (math.pi / 180)  # Convert yaw angle to radians
-
-current_ticks_left = motor.relative_position(motor_pair.PORT_A)
-current_ticks_right = motor.relative_position(motor_pair.PORT_B)
-
-previous_ticks_left = 0
-previous_ticks_right = 0
-
-Waypoints = [(0,0),(10,10),(20,20),(30,30)] #List of waypoints for the robot to follow in cm change this to whatever you want, the robot will follow these waypoints in order
+Waypoints = [(10,10),(20,20),(30,30)] #List of waypoints for the robot to follow in cm change this to whatever you want, the robot will follow these waypoints in order
 
 async def LatestReadings(): #Helper Process to constantly update data
-    global system_status, tilt_angles, yaw_angle_vel, pitch_angle_vel, roll_angle_vel, acceleration_values, x_acceleration, y_acceleration, z_acceleration, current_position, Waypoints, update_cycle_time, raw_unfiltered_status, yaw_angle, pitch_angle, roll_angle, theta, previous_ticks_left, previous_ticks_right, current_ticks_left, current_ticks_right, delta_ticks_left, delta_ticks_right,s_left, s_right, d
+    global system_status, yaw_angle_vel, pitch_angle_vel, roll_angle_vel, acceleration_values, x_acceleration, y_acceleration, z_acceleration, current_position, Waypoints, update_cycle_time, raw_unfiltered_status, yaw_angle, pitch_angle, roll_angle, theta, previous_ticks_left, previous_ticks_right, current_ticks_left, current_ticks_right, delta_ticks_left, delta_ticks_right,s_left, s_right, d, x, y
     
     while system_status:
         ang_vel = hub.motion_sensor.angular_velocity(True)
@@ -75,7 +37,7 @@ async def LatestReadings(): #Helper Process to constantly update data
         pitch_angle = tilt_values[1]
         roll_angle = tilt_values[2]
         
-        theta = yaw_angle * (math.pi / 180)  # Convert yaw angle to radians
+        theta = ( yaw_angle / 10) * (math.pi / 180)  # Convert yaw angle to radians
         
         delta_ticks_left = current_ticks_left - previous_ticks_left
         delta_ticks_right = current_ticks_right - previous_ticks_right
@@ -83,13 +45,13 @@ async def LatestReadings(): #Helper Process to constantly update data
         previous_ticks_left = current_ticks_left
         previous_ticks_right = current_ticks_right
         
-        current_ticks_left = motor.relative_position(motor_pair.PORT_A)
-        current_ticks_right = motor.relative_position(motor_pair.PORT_B)
+        current_ticks_left = motor.relative_position(port.A)
+        current_ticks_right = motor.relative_position(port.B)
 
         s_left = delta_ticks_left * meter_per_tick
         s_right = delta_ticks_right * meter_per_tick
         
-        d=s_left + s_right / 2
+        d=(s_left + s_right) / 2
         
         x += d * math.cos(theta)
         y += d * math.sin(theta)
@@ -130,7 +92,7 @@ class MotorFunctions:
     def  MotorAbsolutePositionCheck(chose_port):
         print(chose_port)
         chose_port_value = motor.absolute_position(chose_port) #Saves Value
-        if not (0 <= chose_port_value <359): #Checks for positional errors
+        if not (0 <= chose_port_value <360): #Checks for positional errors
             print("Nonsensical value")
             return None
         print(chose_port_value)
@@ -214,7 +176,7 @@ class BatteryFunctions:
     @staticmethod
     def GetBatteryTemperature(ConversionMethod): #Type C or F C is for Celsius and F is for Fahrenheit Type N for Kelvin
         print("Getting Battery Temperature")
-        current_battery_temp =  hub.battery_temperature()
+        current_battery_temp =  hub.battery_temperature() # confirm this actually returns Kelvin - if the hub returns Celsius directly, the F/C conversions below will be wrong
         
         if ConversionMethod == "N":
             print(current_battery_temp)
@@ -283,88 +245,263 @@ class CoreFunctions:
         return distance, angle_to_waypoint
     
     @staticmethod 
-    def Go_To_Waypoint(waypoint, base_speed): #Key to Spike Odometry Based Navigational Estimate System or SOBNES for short, this function will move the robot to a waypoint from the current position of the robot
+    async def Go_To_Waypoint(waypoint, base_speed):
         global current_position
-        clockwise = None # This variable will determine the direction of rotation. 0 for clockwise, 1 for counterclockwise
         distance, angle_to_waypoint = CoreFunctions.Get_Directions_To_Waypoint(waypoint)
         print("Moving to Waypoint: ", waypoint)
         print("Distance: ", distance)
         print("Angle: ", angle_to_waypoint)
-        
-        clockwise = ((angle_to_waypoint * 10) - yaw_angle) % 360
-        
-        if clockwise <= 179.5:
+
+        def get_yaw():
+            # tilt_angles() returns yaw in decidegrees, range -1795 to 1800.
+            # Divide by 10 for whole degrees: negative = clockwise from zero, positive = counterclockwise from zero.
+            return hub.motion_sensor.tilt_angles()[0] / 10
+
+        def normalize(angle):
+            # wrap any angle into (-180, 180]
+            return ((angle + 180) % 360) - 180
+
+        target_heading = normalize(angle_to_waypoint)
+
+        # Signed shortest angular distance to target: negative means yaw needs to
+        # decrease (turn clockwise), positive means yaw needs to increase (turn counterclockwise).
+        diff = normalize(target_heading - get_yaw())
+
+        if diff < 0:
             print("Turning Clockwise")
-            while yaw_angle <= ((angle_to_waypoint * 10)*0.9) - 2 or yaw_angle >= ((angle_to_waypoint * 10)*0.9) + 2:
+            while normalize(target_heading - get_yaw()) < -2:
                 motor_pair.move_tank(motor_pair.PAIR_1, base_speed, -base_speed)
-                runloop.sleep_ms(update_cycle_time)
-                break
-            
+                await runloop.sleep_ms(update_cycle_time)
+
             motor_pair.stop(motor_pair.PAIR_1)
-            
-            while yaw_angle <= ((angle_to_waypoint * 10)) - 1 or yaw_angle >= ((angle_to_waypoint * 10)) + 1:
-                            motor_pair.move_tank(motor_pair.PAIR_1, (base_speed*0.2), (-base_speed*0.2))
-                            runloop.sleep_ms(update_cycle_time)
-                            break
-            
+
+            while normalize(target_heading - get_yaw()) < -1:
+                motor_pair.move_tank(motor_pair.PAIR_1, (base_speed * 0.2), (-base_speed * 0.2))
+                await runloop.sleep_ms(update_cycle_time)
+
             motor_pair.stop(motor_pair.PAIR_1)
-            
-            
-        elif clockwise >= 180:
+
+        elif diff > 0:
             print("Turning Counterclockwise")
-            while yaw_angle <= ((angle_to_waypoint * 10)*0.9) - 2 or yaw_angle >= ((angle_to_waypoint * 10)*0.9) + 2:
+            while normalize(target_heading - get_yaw()) > 2:
                 motor_pair.move_tank(motor_pair.PAIR_1, -base_speed, base_speed)
-                runloop.sleep_ms(update_cycle_time)
-                break
-            
+                await runloop.sleep_ms(update_cycle_time)
+
             motor_pair.stop(motor_pair.PAIR_1)
-            
-            while yaw_angle <= ((angle_to_waypoint * 10)) - 1 or yaw_angle >= ((angle_to_waypoint * 10)) + 1:
-                motor_pair.move_tank(motor_pair.PAIR_1, (-base_speed*0.2), (base_speed*0.2))
-                runloop.sleep_ms(update_cycle_time)
-                break
-            
+
+            while normalize(target_heading - get_yaw()) > 1:
+                motor_pair.move_tank(motor_pair.PAIR_1, (-base_speed * 0.2), (base_speed * 0.2))
+                await runloop.sleep_ms(update_cycle_time)
+
             motor_pair.stop(motor_pair.PAIR_1)
-            
+
         else:
-            print("Unknown Direction, Stopping")
+            print("Already Facing Waypoint")
             motor_pair.stop(motor_pair.PAIR_1)
-        
+
         current_position = waypoint
         print("Arrived at Waypoint: ", current_position)
 
     @staticmethod
-    def Stop_On_Color_Detection(chose_color,chose_port, base_speed): #This function will stop the robot when it detects a specific color, this is used for color_based navigation and color-based object detection
+    async def Stop_On_Color_Detection(chose_color,chose_port, base_speed): #This function will stop the robot when it detects a specific color, this is used for color_based navigation and color-based object detection
         while color_sensor.color(chose_port) != chose_color:
             print("Waiting for color:", chose_color)
             print("Current Color: ", color_sensor.color(chose_port))
             motor_pair.move_tank(motor_pair.PAIR_1, base_speed, base_speed)
-            runloop.sleep_ms(update_cycle_time)
+            await runloop.sleep_ms(update_cycle_time)
         motor_pair.stop(motor_pair.PAIR_1)
     
     @staticmethod
-    def Align_On_line(chose_color,chose_port_left,chose_port_right):
+    async def Align_On_line(chose_color,chose_port_left,chose_port_right):
         while color_sensor.color(chose_port_left) != chose_color or color_sensor.color(chose_port_right) != chose_color:
             if color_sensor.color(chose_port_left) != chose_color and color_sensor.color(chose_port_right) == chose_color:
                 print("Aligning Left")
                 motor_pair.move_tank(motor_pair.PAIR_1, 20, -20)
-                runloop.sleep_ms(update_cycle_time)
+                await runloop.sleep_ms(update_cycle_time)
             elif color_sensor.color(chose_port_left) == chose_color and color_sensor.color(chose_port_right) != chose_color:
                 print("Aligning Right")
                 motor_pair.move_tank(motor_pair.PAIR_1, -20, 20)
-                runloop.sleep_ms(update_cycle_time)
+                await runloop.sleep_ms(update_cycle_time)
             elif color_sensor.color(chose_port_left) != chose_color and color_sensor.color(chose_port_right) != chose_color:
                 print("Aligning Both")
                 motor_pair.move_tank(motor_pair.PAIR_1, 20, 20)
-                runloop.sleep_ms(update_cycle_time)
+                await runloop.sleep_ms(update_cycle_time)
         motor_pair.stop(motor_pair.PAIR_1)
+        return "Aligned on line"
+    
+    @staticmethod
+    async def Follow_Line(chose_color,chose_port_left,chose_port_right,base_speed): #This function will follow a line based on the color of the line, this is used for line following navigation
+        while True:
+            if color_sensor.color(chose_port_left) == chose_color and color_sensor.color(chose_port_right) == chose_color:
+                print("On Line")
+                motor_pair.move_tank(motor_pair.PAIR_1, base_speed, base_speed)
+                await runloop.sleep_ms(update_cycle_time)
+            elif color_sensor.color(chose_port_left) != chose_color and color_sensor.color(chose_port_right) == chose_color:
+                print("Off Line Left")
+                motor_pair.move_tank(motor_pair.PAIR_1, base_speed*0.5, base_speed)
+                await runloop.sleep_ms(update_cycle_time)
+            elif color_sensor.color(chose_port_left) == chose_color and color_sensor.color(chose_port_right) != chose_color:
+                print("Off Line Right")
+                motor_pair.move_tank(motor_pair.PAIR_1, base_speed, base_speed*0.5)
+                await runloop.sleep_ms(update_cycle_time)
+            elif color_sensor.color(chose_port_left) != chose_color and color_sensor.color(chose_port_right) != chose_color:
+                print("Lost Line")
+                motor_pair.stop(motor_pair.PAIR_1)
+                break
+        return "Line Following Stopped"
+    
+    @staticmethod
+    def Initialize_Robot(): #This function will initialize the robot, this is used for setting up the robot before starting the main function
+        global current_position, previous_ticks_left, previous_ticks_right, current_ticks_left, current_ticks_right, system_status, port_A_part, port_B_part, port_C_part, port_D_part, port_E_part, port_F_part, part_list, part_locations, medium_motor_ports, large_motor_ports, color_sensor_ports, distance_sensor_ports, force_sensor_ports, motor_port_save, motor_locations, raw_unfiltered_status, yaw_angle_vel, pitch_angle_vel, roll_angle_vel, acceleration_values, x_acceleration, y_acceleration, z_acceleration, yaw_angle, pitch_angle, roll_angle, update_cycle_time, theta, x, y, wheel_radius, ticks_per_revolution, meter_per_tick
+
+        print("Initializing Robot")
+        system_status = True
+        current_position = (0, 0)
+        previous_ticks_left = 0
+        previous_ticks_right = 0
+        current_ticks_left = motor.reset_relative_position(port.A, 0)
+        current_ticks_right = motor.reset_relative_position(port.B, 0)
+        
+
+        raw_unfiltered_status = True
+        ang_vel = hub.motion_sensor.angular_velocity(True)
+        yaw_angle_vel = ang_vel[0]
+        pitch_angle_vel = ang_vel[1]
+        roll_angle_vel = ang_vel[2]
+
+        acceleration_values = hub.motion_sensor.acceleration(raw_unfiltered_status)
+        x_acceleration = acceleration_values[0]
+        y_acceleration = acceleration_values[1]
+        z_acceleration = acceleration_values[2]
+
+        tilt_values = hub.motion_sensor.tilt_angles()
+        yaw_angle = tilt_values[0]
+        pitch_angle = tilt_values[1]
+        roll_angle = tilt_values[2]
+        
+        wheel_radius = 0.05       # in meters, adjust this value based on your robot's wheel radius
+        ticks_per_revolution = 360
+        meter_per_tick = (2 * math.pi * wheel_radius) / ticks_per_revolution    
+
+        update_cycle_time = 10 #Time in milliseconds for how often the data is updated, this is used for the LatestReadings function
+
+
+        x = 0
+        y = 0
+        
+        current_position = (x, y) #x and y position of the robot in cm, this is used for odometry calculations
+
+        theta = ( yaw_angle / 10) * (math.pi / 180)  # Convert yaw angle to radians
+
+        previous_ticks_left = 0
+        previous_ticks_right = 0
+
+        port_list = [port.A, port.B, port.C, port.D, port.E, port.F]
+        port_names = ["A", "B", "C", "D", "E", "F"]
+
+        device_id_to_part = {
+            48: "medium_motor",
+            49: "large_motor",
+            61: "color_sensor",
+            62: "distance_sensor",
+            63: "force_sensor",
+        }
+
+        part_list = [device_id_to_part.get(device.id(p), 0) for p in port_list]
+        port_A_part, port_B_part, port_C_part, port_D_part, port_E_part, port_F_part = part_list
+
+        print("Checked All Ports")
+        for name, part in zip(port_names, part_list):
+            print("Port: " + name + ": ", part)
+
+
+        medium_motor_ports = []
+        large_motor_ports = []
+        color_sensor_ports = []
+        distance_sensor_ports = []
+        force_sensor_ports = []
+        motor_port_save = []
+        motor_locations = []
+
+        for i, part in enumerate(part_list):
+            if part == "medium_motor":
+                medium_motor_ports.append(port_list[i])
+                motor_port_save.append(i)
+                motor_locations.append(port_list[i])
+                print("Motor Found on Port: ", i)
+            elif part == "large_motor":
+                large_motor_ports.append(port_list[i])
+                motor_port_save.append(i)
+                motor_locations.append(port_list[i])
+                print("Motor Found on Port: ", i)
+            elif part == "color_sensor":
+                color_sensor_ports.append(port_list[i])
+            elif part == "distance_sensor":
+                distance_sensor_ports.append(port_list[i])
+            elif part == "force_sensor":
+                force_sensor_ports.append(port_list[i])
+
+        print("Medium Motors: ", medium_motor_ports)
+        print("Large Motors: ", large_motor_ports)
+        print("Color Sensors: ", color_sensor_ports)
+        print("Distance Sensors: ", distance_sensor_ports)
+        print("Force Sensors: ", force_sensor_ports)
+
+
+        part_locations = {
+            "medium_motor": medium_motor_ports,
+            "large_motor": large_motor_ports,
+            "color_sensor": color_sensor_ports,
+            "distance_sensor": distance_sensor_ports,
+            "force_sensor": force_sensor_ports,
+        }
+
+        if len(motor_port_save) >= 2:
+            motor_pair.pair(motor_pair.PAIR_1, port_list[motor_port_save[0]], port_list[motor_port_save[1]])
+
+        for i in motor_port_save[:4]:
+            motor.motor_set_high_resolution_mode(port_list[i], True)
+            motor.reset_relative_position(port_list[i], 0)
+        
+    @staticmethod
+    async def Turn_To_Heading(target_heading, base_speed):
+        coarse_tolerance_deg = 5
+        fine_tolerance_deg = 1
+        slow_speed = base_speed * 0.2
+
+        def get_yaw_degrees():
+            return hub.motion_sensor.tilt_angles()[0] / 10  # decidegrees -> degrees
+
+        def normalize(angle):
+            return ((angle + 180) % 360) - 180
+
+        diff = normalize(target_heading - get_yaw_degrees())
+        turning_clockwise = diff < 0  # negative yaw direction = clockwise
+
+        print("Turning", "Clockwise" if turning_clockwise else "Counterclockwise", "to heading:", target_heading)
+
+        while abs(normalize(target_heading - get_yaw_degrees())) > coarse_tolerance_deg:
+            speed = -base_speed if turning_clockwise else base_speed
+            motor_pair.move_tank(motor_pair.PAIR_1, speed, -speed)
+            await runloop.sleep_ms(update_cycle_time)
+
+        motor_pair.stop(motor_pair.PAIR_1)
+
+        while abs(normalize(target_heading - get_yaw_degrees())) > fine_tolerance_deg:
+            speed = -slow_speed if turning_clockwise else slow_speed
+            motor_pair.move_tank(motor_pair.PAIR_1, speed, -speed)
+            await runloop.sleep_ms(update_cycle_time)
+
+        motor_pair.stop(motor_pair.PAIR_1)
+        print("Reached heading:", get_yaw_degrees())
 
 print("CoreFunctions Loaded")
 
-runloop.run(LatestReadings()) 
-
 async def main(): #Put main code here, this is the main function that will run the robot
     print("Async Main")
+    global system_status
+
     system_status = False #This will stop the LatestReadings function from running, this is used to stop the robot from running when the main function is done
 
-runloop.run(main())
+CoreFunctions.Initialize_Robot()
+runloop.run(LatestReadings(), main())
