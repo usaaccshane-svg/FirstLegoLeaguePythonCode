@@ -45,7 +45,7 @@ current_position = (0,0) #x and y position of the robot in cm, this is used for 
 x = 0
 y = 0
 
-theta = yaw_angle * (math.pi / 180)  # Convert yaw angle to radians
+theta = ( yaw_angle / 10) * (math.pi / 180)  # Convert yaw angle to radians
 
 current_ticks_left = motor.relative_position(port.A)
 current_ticks_right = motor.relative_position(port.B)
@@ -74,7 +74,7 @@ async def LatestReadings(): #Helper Process to constantly update data
         pitch_angle = tilt_values[1]
         roll_angle = tilt_values[2]
         
-        theta = yaw_angle * (math.pi / 180)  # Convert yaw angle to radians
+        theta = ( yaw_angle / 10) * (math.pi / 180)  # Convert yaw angle to radians
         
         delta_ticks_left = current_ticks_left - previous_ticks_left
         delta_ticks_right = current_ticks_right - previous_ticks_right
