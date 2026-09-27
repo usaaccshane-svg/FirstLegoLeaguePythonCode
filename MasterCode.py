@@ -16,44 +16,7 @@ import device # pyright: ignore[reportMissingImports]
 print("Library Load Success")
 print("Starting Function load")
 
-wheel_radius = 0.05       # in meters, adjust this value based on your robot's wheel radius
-ticks_per_revolution = 360
-meter_per_tick = (2 * math.pi * wheel_radius) / ticks_per_revolution
-
-
-
-system_status = True
-raw_unfiltered_status = True
-ang_vel = hub.motion_sensor.angular_velocity(True)
-yaw_angle_vel = ang_vel[0]
-pitch_angle_vel = ang_vel[1]
-roll_angle_vel = ang_vel[2]
-
-acceleration_values = hub.motion_sensor.acceleration(raw_unfiltered_status)
-x_acceleration = acceleration_values[0]
-y_acceleration = acceleration_values[1]
-z_acceleration = acceleration_values[2]
-
-tilt_values = hub.motion_sensor.tilt_angles()
-yaw_angle = tilt_values[0]
-pitch_angle = tilt_values[1]
-roll_angle = tilt_values[2]
-
-update_cycle_time = 10 #Time in milliseconds for how often the data is updated, this is used for the LatestReadings function
-
-current_position = (0,0) #x and y position of the robot in cm, this is used for odometry calculations
-x = 0
-y = 0
-
-theta = ( yaw_angle / 10) * (math.pi / 180)  # Convert yaw angle to radians
-
-current_ticks_left = motor.relative_position(port.A)
-current_ticks_right = motor.relative_position(port.B)
-
-previous_ticks_left = 0
-previous_ticks_right = 0
-
-Waypoints = [(0,0),(10,10),(20,20),(30,30)] #List of waypoints for the robot to follow in cm change this to whatever you want, the robot will follow these waypoints in order
+Waypoints = [(10,10),(20,20),(30,30)] #List of waypoints for the robot to follow in cm change this to whatever you want, the robot will follow these waypoints in order
 
 async def LatestReadings(): #Helper Process to constantly update data
     global system_status, yaw_angle_vel, pitch_angle_vel, roll_angle_vel, acceleration_values, x_acceleration, y_acceleration, z_acceleration, current_position, Waypoints, update_cycle_time, raw_unfiltered_status, yaw_angle, pitch_angle, roll_angle, theta, previous_ticks_left, previous_ticks_right, current_ticks_left, current_ticks_right, delta_ticks_left, delta_ticks_right,s_left, s_right, d, x, y
@@ -282,49 +245,60 @@ class CoreFunctions:
         return distance, angle_to_waypoint
     
     @staticmethod 
-    async def Go_To_Waypoint(waypoint, base_speed): #Key to Spike Odometry Based Navigational Estimate System or SOBNES for short, this function will move the robot to a waypoint from the current position of the robot
+    async def Go_To_Waypoint(waypoint, base_speed):
         global current_position
-        clockwise = None # This variable will determine the direction of rotation. 0 for clockwise, 1 for counterclockwise
         distance, angle_to_waypoint = CoreFunctions.Get_Directions_To_Waypoint(waypoint)
         print("Moving to Waypoint: ", waypoint)
         print("Distance: ", distance)
         print("Angle: ", angle_to_waypoint)
-        
-        clockwise = ((angle_to_waypoint * 10) - yaw_angle) % 360
-        
-        if clockwise <= 179.5:
+
+        def get_yaw():
+            # tilt_angles() returns yaw in decidegrees, range -1795 to 1800.
+            # Divide by 10 for whole degrees: negative = clockwise from zero, positive = counterclockwise from zero.
+            return hub.motion_sensor.tilt_angles()[0] / 10
+
+        def normalize(angle):
+            # wrap any angle into (-180, 180]
+            return ((angle + 180) % 360) - 180
+
+        target_heading = normalize(angle_to_waypoint)
+
+        # Signed shortest angular distance to target: negative means yaw needs to
+        # decrease (turn clockwise), positive means yaw needs to increase (turn counterclockwise).
+        diff = normalize(target_heading - get_yaw())
+
+        if diff < 0:
             print("Turning Clockwise")
-            while yaw_angle <= ((angle_to_waypoint * 10)*0.9) - 2 or yaw_angle >= ((angle_to_waypoint * 10)*0.9) + 2:
+            while normalize(target_heading - get_yaw()) < -2:
                 motor_pair.move_tank(motor_pair.PAIR_1, base_speed, -base_speed)
                 await runloop.sleep_ms(update_cycle_time)
-            
+
             motor_pair.stop(motor_pair.PAIR_1)
-            
-            while yaw_angle <= ((angle_to_waypoint * 10)) - 1 or yaw_angle >= ((angle_to_waypoint * 10)) + 1:
-                            motor_pair.move_tank(motor_pair.PAIR_1, (base_speed*0.2), (-base_speed*0.2))
-                            await runloop.sleep_ms(update_cycle_time)
-            
+
+            while normalize(target_heading - get_yaw()) < -1:
+                motor_pair.move_tank(motor_pair.PAIR_1, (base_speed * 0.2), (-base_speed * 0.2))
+                await runloop.sleep_ms(update_cycle_time)
+
             motor_pair.stop(motor_pair.PAIR_1)
-            
-            
-        elif clockwise > 179.5: # widened from >= 180 so the two branches cover every possible value with no gap between them
+
+        elif diff > 0:
             print("Turning Counterclockwise")
-            while yaw_angle <= ((angle_to_waypoint * 10)*0.9) - 2 or yaw_angle >= ((angle_to_waypoint * 10)*0.9) + 2:
+            while normalize(target_heading - get_yaw()) > 2:
                 motor_pair.move_tank(motor_pair.PAIR_1, -base_speed, base_speed)
                 await runloop.sleep_ms(update_cycle_time)
-            
+
             motor_pair.stop(motor_pair.PAIR_1)
-            
-            while yaw_angle <= ((angle_to_waypoint * 10)) - 1 or yaw_angle >= ((angle_to_waypoint * 10)) + 1:
-                motor_pair.move_tank(motor_pair.PAIR_1, (-base_speed*0.2), (base_speed*0.2))
+
+            while normalize(target_heading - get_yaw()) > 1:
+                motor_pair.move_tank(motor_pair.PAIR_1, (-base_speed * 0.2), (base_speed * 0.2))
                 await runloop.sleep_ms(update_cycle_time)
-            
+
             motor_pair.stop(motor_pair.PAIR_1)
-            
+
         else:
-            print("Unknown Direction, Stopping")
+            print("Already Facing Waypoint")
             motor_pair.stop(motor_pair.PAIR_1)
-        
+
         current_position = waypoint
         print("Arrived at Waypoint: ", current_position)
 
@@ -378,138 +352,148 @@ class CoreFunctions:
     
     @staticmethod
     def Initialize_Robot(): #This function will initialize the robot, this is used for setting up the robot before starting the main function
-            global current_position, previous_ticks_left, previous_ticks_right, current_ticks_left, current_ticks_right, system_status,port_A_part, port_B_part, port_C_part, port_D_part, port_E_part, port_F_part,part_list, part_locations
-            print("Initializing Robot")
-            system_status = True
-            current_position = (0,0)
-            previous_ticks_left = 0
-            previous_ticks_right = 0
-            current_ticks_left = motor.relative_position(port.A)
-            current_ticks_right = motor.relative_position(port.B)
-            
-            port_list = [port.A, port.B, port.C, port.D, port.E, port.F]
-            motor_port_save = []
-            
-            for i in range(6):
-                if i == 0:
-                    port_A = device.id(port.A)
-                    port_A_part = 0
-                    if port_A == 48:
-                        port_A_part = "medium_motor"
-                    elif port_A == 49:
-                        port_A_part = "large_motor"
-                    elif port_A == 61:
-                        port_A_part = "color_sensor"
-                    elif port_A == 62:
-                        port_A_part = "distance_sensor"
-                    elif port_A == 63:
-                        port_A_part = "force_sensor"
-                elif i == 1:
-                    port_B = device.id(port.B)
-                    port_B_part = 0
-                    if port_B == 48:
-                        port_B_part = "medium_motor"
-                    elif port_B == 49:
-                        port_B_part = "large_motor"
-                    elif port_B == 61:
-                        port_B_part = "color_sensor"
-                    elif port_B == 62:
-                        port_B_part = "distance_sensor"
-                    elif port_B == 63:
-                        port_B_part = "force_sensor"
-                elif i == 2:
-                    port_C = device.id(port.C)
-                    port_C_part = 0
-                    if port_C == 48:
-                        port_C_part = "medium_motor"
-                    elif port_C == 49:
-                        port_C_part = "large_motor"
-                    elif port_C == 61:
-                        port_C_part = "color_sensor"
-                    elif port_C == 62:
-                        port_C_part = "distance_sensor"
-                    elif port_C == 63:
-                        port_C_part = "force_sensor"
-                elif i == 3:
-                    port_D = device.id(port.D)
-                    port_D_part = 0
-                    if port_D == 48:
-                        port_D_part = "medium_motor"
-                    elif port_D == 49:
-                        port_D_part = "large_motor"
-                    elif port_D == 61:
-                        port_D_part = "color_sensor"
-                    elif port_D == 62:
-                        port_D_part = "distance_sensor"
-                    elif port_D == 63:
-                        port_D_part = "force_sensor"
-                elif i == 4:
-                    port_E = device.id(port.E)
-                    port_E_part = 0
-                    if port_E == 48:
-                        port_E_part = "medium_motor"
-                    elif port_E == 49:
-                        port_E_part = "large_motor"
-                    elif port_E == 61:
-                        port_E_part = "color_sensor"
-                    elif port_E == 62:
-                        port_E_part = "distance_sensor"
-                    elif port_E == 63:
-                        port_E_part = "force_sensor"
-                elif i == 5:
-                    port_F = device.id(port.F)
-                    port_F_part = 0
-                    if port_F == 48:
-                        port_F_part = "medium_motor"
-                    elif port_F == 49:
-                        port_F_part = "large_motor"
-                    elif port_F == 61:
-                        port_F_part = "color_sensor"
-                    elif port_F == 62:
-                        port_F_part = "distance_sensor"
-                    elif port_F == 63:
-                        port_F_part = "force_sensor"
-                else:
-                    print("Unknown Port, Skipping")
-                    continue
-            
-            part_list = [port_A_part, port_B_part, port_C_part, port_D_part, port_E_part, port_F_part]
-            
-            print("Checked All Ports")
-            print("Port: A: ", port_A_part)
-            print("Port: B: ", port_B_part)
-            print("Port: C: ", port_C_part)
-            print("Port: D: ", port_D_part)
-            print("Port: E: ", port_E_part)
-            print("Port: F: ", port_F_part)
-            
+        global current_position, previous_ticks_left, previous_ticks_right, current_ticks_left, current_ticks_right, system_status, port_A_part, port_B_part, port_C_part, port_D_part, port_E_part, port_F_part, part_list, part_locations, medium_motor_ports, large_motor_ports, color_sensor_ports, distance_sensor_ports, force_sensor_ports, motor_port_save, motor_locations, raw_unfiltered_status, yaw_angle_vel, pitch_angle_vel, roll_angle_vel, acceleration_values, x_acceleration, y_acceleration, z_acceleration, yaw_angle, pitch_angle, roll_angle, update_cycle_time, theta, x, y, wheel_radius, ticks_per_revolution, meter_per_tick
 
-            part_locations = {}
-            for i in range(6):
-                if part_list[i] in ("medium_motor", "large_motor", "color_sensor", "distance_sensor", "force_sensor"):
-                    if part_list[i] not in part_locations:
-                        part_locations[part_list[i]] = []
-                    part_locations[part_list[i]].append(port_list[i])
-            
-            print("Part Locations: ", part_locations)
-            
-            motor_locations = []
-            
-            for i in range(6):
-                if part_list[i] == "medium_motor" or part_list[i] == "large_motor":
-                    motor_port_save.append(i)
-                    motor_locations.append(port_list[i])
-                    print("Motor Found on Port: ", i)
-            
-            if len(motor_port_save) >= 2:
-                motor_pair.pair(motor_pair.PAIR_1, port_list[motor_port_save[0]], port_list[motor_port_save[1]])
+        print("Initializing Robot")
+        system_status = True
+        current_position = (0, 0)
+        previous_ticks_left = 0
+        previous_ticks_right = 0
+        current_ticks_left = motor.reset_relative_position(port.A, 0)
+        current_ticks_right = motor.reset_relative_position(port.B, 0)
+        
 
-            for i in motor_port_save[:4]:
-                motor.motor_set_high_resolution_mode(port_list[i], True)
-                motor.reset_relative_position(port_list[i], 0)
+        raw_unfiltered_status = True
+        ang_vel = hub.motion_sensor.angular_velocity(True)
+        yaw_angle_vel = ang_vel[0]
+        pitch_angle_vel = ang_vel[1]
+        roll_angle_vel = ang_vel[2]
 
-            print("Motor Locations: ", motor_locations)
-            print("Robot Initialized")
+        acceleration_values = hub.motion_sensor.acceleration(raw_unfiltered_status)
+        x_acceleration = acceleration_values[0]
+        y_acceleration = acceleration_values[1]
+        z_acceleration = acceleration_values[2]
+
+        tilt_values = hub.motion_sensor.tilt_angles()
+        yaw_angle = tilt_values[0]
+        pitch_angle = tilt_values[1]
+        roll_angle = tilt_values[2]
+        
+        wheel_radius = 0.05       # in meters, adjust this value based on your robot's wheel radius
+        ticks_per_revolution = 360
+        meter_per_tick = (2 * math.pi * wheel_radius) / ticks_per_revolution    
+
+        update_cycle_time = 10 #Time in milliseconds for how often the data is updated, this is used for the LatestReadings function
+
+
+        x = 0
+        y = 0
+        
+        current_position = (x, y) #x and y position of the robot in cm, this is used for odometry calculations
+
+        theta = ( yaw_angle / 10) * (math.pi / 180)  # Convert yaw angle to radians
+
+        previous_ticks_left = 0
+        previous_ticks_right = 0
+
+        port_list = [port.A, port.B, port.C, port.D, port.E, port.F]
+        port_names = ["A", "B", "C", "D", "E", "F"]
+
+        device_id_to_part = {
+            48: "medium_motor",
+            49: "large_motor",
+            61: "color_sensor",
+            62: "distance_sensor",
+            63: "force_sensor",
+        }
+
+        part_list = [device_id_to_part.get(device.id(p), 0) for p in port_list]
+        port_A_part, port_B_part, port_C_part, port_D_part, port_E_part, port_F_part = part_list
+
+        print("Checked All Ports")
+        for name, part in zip(port_names, part_list):
+            print("Port: " + name + ": ", part)
+
+
+        medium_motor_ports = []
+        large_motor_ports = []
+        color_sensor_ports = []
+        distance_sensor_ports = []
+        force_sensor_ports = []
+        motor_port_save = []
+        motor_locations = []
+
+        for i, part in enumerate(part_list):
+            if part == "medium_motor":
+                medium_motor_ports.append(port_list[i])
+                motor_port_save.append(i)
+                motor_locations.append(port_list[i])
+                print("Motor Found on Port: ", i)
+            elif part == "large_motor":
+                large_motor_ports.append(port_list[i])
+                motor_port_save.append(i)
+                motor_locations.append(port_list[i])
+                print("Motor Found on Port: ", i)
+            elif part == "color_sensor":
+                color_sensor_ports.append(port_list[i])
+            elif part == "distance_sensor":
+                distance_sensor_ports.append(port_list[i])
+            elif part == "force_sensor":
+                force_sensor_ports.append(port_list[i])
+
+        print("Medium Motors: ", medium_motor_ports)
+        print("Large Motors: ", large_motor_ports)
+        print("Color Sensors: ", color_sensor_ports)
+        print("Distance Sensors: ", distance_sensor_ports)
+        print("Force Sensors: ", force_sensor_ports)
+
+
+        part_locations = {
+            "medium_motor": medium_motor_ports,
+            "large_motor": large_motor_ports,
+            "color_sensor": color_sensor_ports,
+            "distance_sensor": distance_sensor_ports,
+            "force_sensor": force_sensor_ports,
+        }
+
+        if len(motor_port_save) >= 2:
+            motor_pair.pair(motor_pair.PAIR_1, port_list[motor_port_save[0]], port_list[motor_port_save[1]])
+
+        for i in motor_port_save[:4]:
+            motor.motor_set_high_resolution_mode(port_list[i], True)
+            motor.reset_relative_position(port_list[i], 0)
+        
+    @staticmethod
+    async def Turn_To_Heading(target_heading, base_speed):
+        coarse_tolerance_deg = 5
+        fine_tolerance_deg = 1
+        slow_speed = base_speed * 0.2
+
+        def get_yaw_degrees():
+            return hub.motion_sensor.tilt_angles()[0] / 10  # decidegrees -> degrees
+
+        def normalize(angle):
+            return ((angle + 180) % 360) - 180
+
+        diff = normalize(target_heading - get_yaw_degrees())
+        turning_clockwise = diff < 0  # negative yaw direction = clockwise
+
+        print("Turning", "Clockwise" if turning_clockwise else "Counterclockwise", "to heading:", target_heading)
+
+        while abs(normalize(target_heading - get_yaw_degrees())) > coarse_tolerance_deg:
+            speed = -base_speed if turning_clockwise else base_speed
+            motor_pair.move_tank(motor_pair.PAIR_1, speed, -speed)
+            await runloop.sleep_ms(update_cycle_time)
+
+        motor_pair.stop(motor_pair.PAIR_1)
+
+        while abs(normalize(target_heading - get_yaw_degrees())) > fine_tolerance_deg:
+            speed = -slow_speed if turning_clockwise else slow_speed
+            motor_pair.move_tank(motor_pair.PAIR_1, speed, -speed)
+            await runloop.sleep_ms(update_cycle_time)
+
+        motor_pair.stop(motor_pair.PAIR_1)
+        print("Reached heading:", get_yaw_degrees())
 
 print("CoreFunctions Loaded")
 
